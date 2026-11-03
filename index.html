@@ -75,6 +75,11 @@ header{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-
 .setup small{color:var(--muted);font-weight:400}
 .actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 [hidden]{display:none!important}
+.upd{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.btn[disabled]{opacity:.6;cursor:default}
+.busy svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.busy svg{animation:none}}
 header{position:relative}
 .btn.icon{padding:7px 9px;display:inline-flex;align-items:center;justify-content:center}
 .menu{position:absolute;top:calc(100% + 8px);right:0;width:min(480px,100%);z-index:20;box-shadow:0 12px 32px rgba(0,0,0,.18)}
@@ -98,6 +103,10 @@ header{position:relative}
     <div class="filters">
       <div class="group" id="fy"><span class="lbl">Año</span></div>
       <div class="group" id="ft"><span class="lbl">Tipo</span></div>
+      <span class="upd" id="upd"></span>
+      <button class="btn icon" id="btnRefresh" type="button" aria-label="Actualizar datos" title="Actualizar datos">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+      </button>
       <button class="btn icon" id="btnCfg" type="button" aria-label="Configuración de datos" aria-haspopup="true" aria-expanded="false" title="Configuración de datos">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </button>
@@ -156,7 +165,7 @@ var COLORS = {Argentina:'var(--ar)', Paraguay:'var(--py)', 'Brasil':'var(--br)',
 var ORIGINS = ['Argentina','Paraguay','Brasil','Sin origen'];
 var state = {year:'Todos', tipo:'Todos', origin:'Argentina', expanded:{}};
 var LS = {all:'opo.urlAll', sup:'opo.urlSup'};
-var APP_VERSION = '1.0.0';   // lo actualiza el hook .githooks/pre-commit en cada commit
+var APP_VERSION = '1.0.1';   // lo actualiza el hook .githooks/pre-commit en cada commit
 var PAGES_URL = 'https://valentinacapuchina.github.io/proyecto-prueba/';
 var MEM = {};   // respaldo si el navegador no deja usar localStorage
 
@@ -186,7 +195,7 @@ function normalizeUrl(url){
   return 'https://docs.google.com/spreadsheets/d/'+m[1]+'/export?format=csv&gid='+(g?g[1]:'0');
 }
 function fetchGrid(url){
-  return fetch(normalizeUrl(url)).catch(function(){
+  return fetch(normalizeUrl(url), {cache:'no-store'}).catch(function(){
     throw new Error('No pude leer la hoja desde el navegador. La hoja debe estar compartida como "Cualquier persona con el enlace: lector" o publicada en la web.');
   }).then(function(r){
     if(!r.ok) throw new Error('Google respondió '+r.status+'. Revisá el enlace y los permisos de la hoja.');
@@ -251,20 +260,31 @@ function setMsg(t,cls){
   var b=document.getElementById('banner');
   b.textContent = cls==='err' ? t : ''; b.hidden = cls!=='err';
 }
+var loading = false;
+function setBusy(b){
+  var r=document.getElementById('btnRefresh'); r.disabled=b; r.classList.toggle('busy',b);
+}
+document.getElementById('btnRefresh').onclick = function(e){
+  e.stopPropagation();
+  if(!lsGet(LS.all)||!lsGet(LS.sup)){ setMenu(true); setMsg('Pegá los dos enlaces para cargar los datos.'); return; }
+  load();
+};
 function load(){
   var ua=lsGet(LS.all), us=lsGet(LS.sup);
   if(!ua||!us){ setMenu(true); setMsg('Pegá los dos enlaces para cargar los datos.'); render(); return Promise.resolve(); }
-  setMsg('Cargando…');
+  if(loading) return Promise.resolve();
+  loading=true; setBusy(true); setMsg('Cargando…');
   return Promise.all([fetchGrid(ua), fetchGrid(us)]).then(function(g){
     var allG=g[0], supG=g[1];
     if(hasCol(allG,'Company') && hasCol(supG,'Exporter')){ var tmp=allG; allG=supG; supG=tmp; }   // enlaces pegados al revés
     RAW=buildRows(allG,supG);
     setMsg(RAW.length+' operaciones cargadas.','ok');
     setMenu(false);
+    document.getElementById('upd').textContent = 'Actualizado '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
     render();
   }).catch(function(e){
     setMsg(e.message||String(e),'err'); render();
-  });
+  }).then(function(){ loading=false; setBusy(false); });
 }
 
 /* ---------- vista ---------- */
