@@ -79,6 +79,11 @@ header{position:relative}
 .btn.icon{padding:7px 9px;display:inline-flex;align-items:center;justify-content:center}
 .menu{position:absolute;top:calc(100% + 8px);right:0;width:min(480px,100%);z-index:20;box-shadow:0 12px 32px rgba(0,0,0,.18)}
 .msg{font-size:13px}
+.msg:empty{display:none}
+.ver{margin:0;font-family:var(--mono);font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:10px}
+.banner{border:1px solid var(--bad);color:var(--bad);border-radius:8px;padding:10px 14px;background:var(--surface);margin-bottom:20px}
+#shareBox{display:flex;flex-direction:column;gap:4px}
+#shareBox[hidden]{display:none}
 .msg.err{color:var(--bad)}
 .msg.ok{color:var(--br)}
 </style>
@@ -109,12 +114,20 @@ header{position:relative}
       <small>Encabezados en la fila 1. Se usa la columna Country para asignar el origen.</small>
     </label>
     <div class="actions">
-      <button class="btn primary" id="btnSave" type="button">Guardar y cargar</button>
+      <button class="btn primary" id="btnSave" type="button">Guardar y cerrar</button>
+      <button class="btn" id="btnShare" type="button">Copiar enlace para compartir</button>
       <button class="btn" id="btnClear" type="button">Borrar enlaces guardados</button>
-      <span class="msg" id="msg" role="status"></span>
     </div>
+    <span class="msg" id="msg" role="status"></span>
+    <div id="shareBox" hidden>
+      <input id="shareOut" type="text" readonly aria-label="Enlace para compartir">
+      <small>Quien tenga este enlace puede ver los datos con tu configuración. Compartilo solo con tu equipo.</small>
+    </div>
+    <p class="ver">Versión <span id="ver"></span></p>
   </section>
   </header>
+
+  <div class="banner" id="banner" role="alert" hidden></div>
 
   <div id="app">
     <section class="kpis" id="kpis"></section>
@@ -143,10 +156,13 @@ var COLORS = {Argentina:'var(--ar)', Paraguay:'var(--py)', 'Brasil':'var(--br)',
 var ORIGINS = ['Argentina','Paraguay','Brasil','Sin origen'];
 var state = {year:'Todos', tipo:'Todos', origin:'Argentina', expanded:{}};
 var LS = {all:'opo.urlAll', sup:'opo.urlSup'};
+var APP_VERSION = '1.0.0';   // lo actualiza el hook .githooks/pre-commit en cada commit
+var PAGES_URL = 'https://valentinacapuchina.github.io/proyecto-prueba/';
+var MEM = {};   // respaldo si el navegador no deja usar localStorage
 
-function lsGet(k){ try{ return localStorage.getItem(k)||''; }catch(e){ return ''; } }
-function lsSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
-function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+function lsGet(k){ try{ return localStorage.getItem(k)||MEM[k]||''; }catch(e){ return MEM[k]||''; } }
+function lsSet(k,v){ MEM[k]=v; try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function lsDel(k){ delete MEM[k]; try{ localStorage.removeItem(k); }catch(e){} }
 
 /* ---------- carga de datos ---------- */
 function parseCSV(text){
@@ -230,7 +246,11 @@ function buildRows(allGrid, supGrid){
   });
   return out;
 }
-function setMsg(t,cls){ var m=document.getElementById('msg'); m.textContent=t; m.className='msg '+(cls||''); }
+function setMsg(t,cls){
+  var m=document.getElementById('msg'); m.textContent=t; m.className='msg '+(cls||'');
+  var b=document.getElementById('banner');
+  b.textContent = cls==='err' ? t : ''; b.hidden = cls!=='err';
+}
 function load(){
   var ua=lsGet(LS.all), us=lsGet(LS.sup);
   if(!ua||!us){ setMenu(true); setMsg('Pegá los dos enlaces para cargar los datos.'); render(); return Promise.resolve(); }
@@ -243,7 +263,6 @@ function load(){
     setMenu(false);
     render();
   }).catch(function(e){
-    setMenu(true);
     setMsg(e.message||String(e),'err'); render();
   });
 }
@@ -380,13 +399,37 @@ document.getElementById('btnSave').onclick = function(){
   var a=document.getElementById('urlAll').value.trim(), b=document.getElementById('urlSup').value.trim();
   if(!/^https:\/\//.test(a)||!/^https:\/\//.test(b)){ setMsg('Los dos enlaces deben empezar con https://','err'); return; }
   if(!lsSet(LS.all,a)||!lsSet(LS.sup,b)) setMsg('El navegador no permite guardar. Se usan solo en esta sesión.','err');
+  setMenu(false);
   load();
+};
+function utf8b64(s){ return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function b64utf8(s){ s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='='; return decodeURIComponent(escape(atob(s))); }
+document.getElementById('btnShare').onclick = function(){
+  var a=lsGet(LS.all), s=lsGet(LS.sup);
+  if(!a||!s){ setMsg('Guardá primero los dos enlaces para poder compartirlos.','err'); return; }
+  var base = /^https?:/.test(location.protocol) ? location.origin+location.pathname : PAGES_URL;
+  var link = base+'#cfg='+utf8b64(JSON.stringify({a:a,s:s}));
+  var box=document.getElementById('shareBox'), out=document.getElementById('shareOut');
+  out.value=link; box.hidden=false; out.focus(); out.select();
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(link).then(function(){ setMsg('Enlace copiado.','ok'); }, function(){ setMsg('Copialo del recuadro de abajo.'); });
+  } else setMsg('Copialo del recuadro de abajo.');
 };
 document.getElementById('btnClear').onclick = function(){
   lsDel(LS.all); lsDel(LS.sup); RAW=[];
   document.getElementById('urlAll').value=''; document.getElementById('urlSup').value='';
   setMsg('Enlaces borrados de este navegador.'); render();
 };
+document.getElementById('ver').textContent = APP_VERSION;
+(function importShared(){   // enlace compartido: #cfg=<configuración>
+  var m = location.hash.match(/^#cfg=([\w-]+)/);
+  if(!m) return;
+  try{
+    var c = JSON.parse(b64utf8(m[1]));
+    if(c && /^https:\/\//.test(c.a) && /^https:\/\//.test(c.s)){ lsSet(LS.all,c.a); lsSet(LS.sup,c.s); }
+  }catch(e){}
+  try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+})();
 document.getElementById('urlAll').value = lsGet(LS.all);
 document.getElementById('urlSup').value = lsGet(LS.sup);
 load();

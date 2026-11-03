@@ -1,0 +1,11 @@
+#!/bin/sh
+# Sube el número de parche de APP_VERSION en index.html en cada commit (1.0.0 -> 1.0.1).
+f=index.html
+[ -f "$f" ] || exit 0
+v=$(sed -n "s/^var APP_VERSION = '\([0-9]*\.[0-9]*\.[0-9]*\)'.*/\1/p" "$f" | head -n1)
+[ -n "$v" ] || exit 0
+maj=${v%%.*}; rest=${v#*.}; min=${rest%%.*}; pat=${rest#*.}
+new="$maj.$min.$((pat+1))"
+sed -i "s/^var APP_VERSION = '$v'/var APP_VERSION = '$new'/" "$f"
+git add "$f"
+echo "Versión: $v -> $new"
