@@ -173,9 +173,15 @@ function colIndex(grid, name){
     for(j=0;j<grid[i].length;j++){ if(String(grid[i][j]).trim()===name){ hdr=i; break; } }
     if(hdr>=0) break;
   }
-  if(hdr<0) throw new Error('No encontré la columna "'+name+'" en las primeras filas.');
+  if(hdr<0){
+    var seen=(grid[0]||[]).concat(grid[1]||[]).map(function(h){return String(h).trim()}).filter(Boolean).slice(0,6).join(', ');
+    throw new Error('No encontré la columna "'+name+'". Primeras columnas que recibí: '+(seen||'ninguna')+'. Revisá que el enlace apunte a la pestaña correcta.');
+  }
   var idx={}; grid[hdr].forEach(function(h,k){ h=String(h).trim(); if(h && !(h in idx)) idx[h]=k; });
   return {hdr:hdr, idx:idx};
+}
+function hasCol(grid, name){
+  return grid.slice(0,6).some(function(r){ return r.some(function(h){ return String(h).trim()===name; }); });
 }
 function num(s){
   s=String(s==null?'':s).trim(); if(!s) return NaN;
@@ -215,7 +221,9 @@ function load(){
   if(!ua||!us){ document.getElementById('setup').hidden=false; setMsg('Pegá los dos enlaces para cargar los datos.'); render(); return Promise.resolve(); }
   setMsg('Cargando…');
   return Promise.all([fetchGrid(ua), fetchGrid(us)]).then(function(g){
-    RAW=buildRows(g[0],g[1]);
+    var allG=g[0], supG=g[1];
+    if(hasCol(allG,'Company') && hasCol(supG,'Exporter')){ var tmp=allG; allG=supG; supG=tmp; }   // enlaces pegados al revés
+    RAW=buildRows(allG,supG);
     setMsg(RAW.length+' operaciones cargadas.','ok');
     document.getElementById('setup').hidden=true;
     render();
